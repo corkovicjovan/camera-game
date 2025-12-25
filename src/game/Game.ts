@@ -6,6 +6,7 @@ import { Renderer } from '../renderer/Renderer'
 import { RunnerRenderer } from '../renderer/RunnerRenderer'
 import { GameState } from './GameState'
 import { RunnerGameState } from './RunnerGameState'
+import { PersistenceManager } from './PersistenceManager'
 import type { GameMode, GamePhase } from './types'
 
 export class Game {
@@ -38,6 +39,9 @@ export class Game {
   private showDebug: boolean = false
 
   private overlay!: HTMLDivElement
+  private isPaused: boolean = false
+  private persistence: PersistenceManager = new PersistenceManager()
+  private isNewHighScore: boolean = false
 
   async init(): Promise<void> {
     // Get DOM elements
@@ -69,6 +73,15 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'd' || e.key === 'D') {
         this.showDebug = !this.showDebug
+      }
+    })
+
+    // Visibility API - pause when tab hidden
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.pause()
+      } else {
+        this.resume()
       }
     })
 
@@ -305,9 +318,13 @@ export class Game {
     if (this.gameMode === 'stars') {
       this.starsState.setPlayerPosition(bounds.centerX, bounds.leftEdge, bounds.rightEdge, bounds.headY)
     } else {
-      // Pass actual body position and width for natural collision
-      const bodyWidth = bounds.rightEdge - bounds.leftEdge
-      this.runnerState.setPlayerPosition(bounds.centerX, bodyWidth)
+      // Pass RAW position for collision (immediate response, no center drift)
+      // Pass SMOOTHED position for rendering (smooth visual movement)
+      this.runnerState.setPlayerPosition(
+        bounds.rawCenterX,      // raw for collision
+        bounds.rawBodyWidth,    // actual detected body width
+        bounds.centerX          // smoothed for rendering
+      )
 
       // Handle jump - trigger on rising edge
       if (bounds.isJumping && !this.lastJumpState) {
@@ -337,17 +354,26 @@ export class Game {
 
   private updateStarsMode(deltaTime: number, currentTime: number): void {
     // Update game state
-    const { caught, missed } = this.starsState.update(deltaTime, currentTime)
+    const { caught, missed, leveledUp, powerUpCollected, shieldBlocked } = this.starsState.update(deltaTime, currentTime)
 
     // Play sounds for events
     if (caught.length > 0) {
       this.audio.playCatch()
+      // Small shake on catch
+      this.starsRenderer.triggerShake(3, 100)
+      // Trigger flash at each catch position
+      for (const obj of caught) {
+        const color = obj.type === 'star' ? '#FFD700' : '#FF69B4'
+        this.starsRenderer.triggerCatchFlash(obj.x, obj.y, color)
+      }
 
       // Check for milestone (every 10 points)
       if (this.starsState.score % 10 === 0 && this.starsState.score > this.lastScore) {
         this.audio.playMilestone()
         this.milestoneTimer = 30
         this.lastScore = this.starsState.score
+        // Medium shake on milestone
+        this.starsRenderer.triggerShake(8, 200)
 
         if ('vibrate' in navigator) {
           navigator.vibrate([100, 50, 100])
@@ -357,6 +383,25 @@ export class Game {
 
     if (missed.length > 0) {
       this.audio.playBadCatch()
+      // Small shake on bad catch
+      this.starsRenderer.triggerShake(4, 150)
+    }
+
+    if (leveledUp) {
+      this.audio.playLevelUp()
+      // Medium shake on level up
+      this.starsRenderer.triggerShake(6, 200)
+    }
+
+    // Power-up sounds
+    if (powerUpCollected) {
+      this.audio.playPowerUpCollect()
+      this.starsRenderer.triggerShake(5, 150)
+    }
+
+    if (shieldBlocked) {
+      this.audio.playShieldBlock()
+      this.starsRenderer.triggerShake(6, 200)
     }
 
     // Render
@@ -367,7 +412,11 @@ export class Game {
       this.starsState.particles,
       this.starsState.scorePopups,
       this.starsState.score,
-      this.starsState.combo
+      this.starsState.combo,
+      this.starsState.level,
+      this.persistence.getHighScore('stars'),
+      this.starsState.powerUpObjects,
+      this.starsState.activePowerUp
     )
 
     if (this.milestoneTimer > 0) {
@@ -385,9 +434,10 @@ export class Game {
         this.runnerState.objects,
         this.runnerState.particles,
         this.runnerState.score,
-        this.runnerState.playerX
+        this.runnerState.playerXSmooth,  // smoothed for rendering
+        this.persistence.getHighScore('runner')
       )
-      this.runnerRenderer.drawGameOver(this.runnerState.score, this.runnerState.config.level)
+      this.runnerRenderer.drawGameOver(this.runnerState.score, this.runnerState.config.level, this.isNewHighScore)
       return
     }
 
@@ -407,6 +457,8 @@ export class Game {
 
     if (result.crashed.length > 0) {
       this.audio.playCrash()
+      // Large shake on crash
+      this.runnerRenderer.triggerShake(12, 300)
       if ('vibrate' in navigator) {
         navigator.vibrate(200)
       }
@@ -414,6 +466,8 @@ export class Game {
 
     if (result.leveledUp) {
       this.audio.playLevelUp()
+      // Medium shake on level up (celebratory)
+      this.runnerRenderer.triggerShake(6, 200)
     }
 
     if (result.gameOver) {
@@ -422,14 +476,16 @@ export class Game {
       this.showGameOver()
     }
 
-    // Render - pass actual player X position for natural body placement
+    // Render - pass SMOOTHED position for visual rendering (smooth movement)
+    // Collision uses raw position internally (no center drift)
     this.runnerRenderer.render(
       this.runnerState.config,
       this.runnerState.player,
       this.runnerState.objects,
       this.runnerState.particles,
       this.runnerState.score,
-      this.runnerState.playerX
+      this.runnerState.playerXSmooth,  // smoothed for rendering
+      this.persistence.getHighScore('runner')
     )
 
     // Debug: show collision zones (toggle with 'd' key)
@@ -445,12 +501,27 @@ export class Game {
   }
 
   private showGameOver(): void {
+    // Save score and check for new high score
+    this.isNewHighScore = this.persistence.updateRunnerScore(
+      this.runnerState.score,
+      this.runnerState.config.level
+    )
+
+    const encouragement = this.isNewHighScore ? 'NEW HIGH SCORE!' : 'Great try!'
+    const encouragementColor = this.isNewHighScore ? '#FFD700' : 'white'
+
+    // Calculate star rating: 1 star = 100pts, 2 stars = 300pts, 3 stars = 500pts
+    const score = this.runnerState.score
+    const stars = score >= 500 ? 3 : score >= 300 ? 2 : score >= 100 ? 1 : 0
+    const starDisplay = this.getStarDisplayHTML(stars)
+
     // Show overlay with game over options
     this.overlay.innerHTML = `
       <div class="title" style="color: #FF6B6B;">Game Over!</div>
       <div class="loading-text" style="font-size: 32px; color: #FFD700;">Score: ${this.runnerState.score}</div>
       <div class="loading-text" style="font-size: 20px; color: #9B59B6;">Level ${this.runnerState.config.level}</div>
-      <div class="loading-text" style="font-size: 24px; color: white; margin-top: 10px;">Great try!</div>
+      <div class="star-rating" style="font-size: 36px; margin: 10px 0;">${starDisplay}</div>
+      <div class="loading-text" style="font-size: 24px; color: ${encouragementColor}; margin-top: 10px;">${encouragement}</div>
       <div class="game-over-buttons">
         <button class="game-over-button play-again-button">Play Again</button>
         <button class="game-over-button change-game-button">Change Game</button>
@@ -466,16 +537,30 @@ export class Game {
     changeGameBtn?.addEventListener('click', () => this.goToModeSelect())
   }
 
+  private getStarDisplayHTML(earnedStars: number): string {
+    let html = ''
+    for (let i = 0; i < 3; i++) {
+      if (i < earnedStars) {
+        html += '<span style="color: #FFD700; text-shadow: 0 0 10px #FFA500;">&#9733;</span>'
+      } else {
+        html += '<span style="color: rgba(255,255,255,0.3);">&#9733;</span>'
+      }
+    }
+    return html
+  }
+
   private restartGame(): void {
     this.overlay.classList.add('hidden')
     this.runnerState.reset()
     this.isRunnerGameOver = false
+    this.isNewHighScore = false
     this.lastScore = 0
   }
 
   private goToModeSelect(): void {
     this.phase = 'READY'
     this.isRunnerGameOver = false
+    this.isNewHighScore = false
     if (this.animationId) {
       cancelAnimationFrame(this.animationId)
       this.animationId = null
@@ -488,6 +573,36 @@ export class Game {
     this.runnerRenderer.resize()
     this.starsState?.updateDimensions(this.starsRenderer.getWidth(), this.starsRenderer.getHeight())
     this.runnerState?.updateDimensions(this.runnerRenderer.getWidth(), this.runnerRenderer.getHeight())
+  }
+
+  private pause(): void {
+    if (this.isPaused || this.phase !== 'PLAYING') return
+    this.isPaused = true
+
+    // Stop game loop
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId)
+      this.animationId = null
+    }
+
+    // Stop ML processing
+    this.poseDetector.stop()
+    this.bodySegmenter.stop()
+  }
+
+  private resume(): void {
+    if (!this.isPaused || this.phase !== 'PLAYING') return
+    this.isPaused = false
+
+    // Restart ML processing
+    this.poseDetector.start(this.video, (bounds: BodyBounds) => {
+      this.handlePoseUpdate(bounds)
+    })
+    this.bodySegmenter.start(this.video)
+
+    // Restart game loop with fresh timestamp to avoid huge deltaTime
+    this.lastFrameTime = performance.now()
+    this.gameLoop()
   }
 
   destroy(): void {

@@ -22,9 +22,10 @@ export class RunnerGameState {
   particles: RunnerParticle[] = []
   config: RunnerGameConfig
 
-  // Continuous player X position (0-1 normalized) - tracks actual body
-  playerX: number = 0.5
-  playerBodyWidth: number = 0.12 // Narrower collision for easier dodging
+  // Player positions (0-1 normalized)
+  playerX: number = 0.5           // Raw position for collision (immediate response)
+  playerXSmooth: number = 0.5     // Smoothed position for rendering (no jitter)
+  playerBodyWidth: number = 0.12  // Actual detected body width for collision
 
   private nextObjectId: number = 0
   private lastSpawnTime: number = 0
@@ -32,6 +33,10 @@ export class RunnerGameState {
   private readonly LEVEL_UP_SCORE = 500
   private readonly JUMP_DURATION = 700 // ms - slightly longer for visibility
   private jumpStartTime: number = 0
+
+  // Object pooling constants
+  private readonly MAX_PARTICLES = 50
+  private readonly MAX_OBJECTS = 20
 
   constructor(canvasWidth: number, canvasHeight: number) {
     this.config = {
@@ -56,22 +61,23 @@ export class RunnerGameState {
     this.config.canvasHeight = height
   }
 
-  // Now takes actual body position instead of mapping to lanes
-  setPlayerPosition(centerX: number, _bodyWidth: number): void {
-    this.playerX = centerX
+  // Takes raw position for collision and smoothed position for rendering
+  setPlayerPosition(rawCenterX: number, bodyWidth: number, smoothedCenterX: number): void {
+    // Raw position for collision - immediate response, no center drift
+    this.playerX = rawCenterX
 
-    // Use a fixed narrow width for collision (easier to dodge)
-    // But shrink it slightly more when near edges to make side dodges easier
-    const distFromCenter = Math.abs(centerX - 0.5)
-    const baseWidth = 0.10 // Narrow base collision
-    const edgeShrink = distFromCenter * 0.08 // Shrink more when at edges
-    this.playerBodyWidth = Math.max(0.06, baseWidth - edgeShrink)
+    // Smoothed position for rendering - smooth visual movement
+    this.playerXSmooth = smoothedCenterX
 
-    // Still update lane for compatibility, but collision uses continuous X
+    // Use actual detected body width, with reasonable min/max bounds
+    // Scale down slightly for more forgiving collision (80% of detected width)
+    this.playerBodyWidth = Math.max(0.06, Math.min(0.20, bodyWidth * 0.8))
+
+    // Still update lane for compatibility (used by some rendering)
     let newLane: Lane
-    if (centerX < 0.33) {
+    if (rawCenterX < 0.33) {
       newLane = 0
-    } else if (centerX > 0.66) {
+    } else if (rawCenterX > 0.66) {
       newLane = 2
     } else {
       newLane = 1
@@ -124,23 +130,31 @@ export class RunnerGameState {
     const collisionZoneStart = 0.55
     const collisionZoneEnd = 0.75
 
-    for (let i = this.objects.length - 1; i >= 0; i--) {
+    for (let i = 0; i < this.objects.length; i++) {
       const obj = this.objects[i]
+      if (!obj.active) continue
+
       obj.z += speed
 
-      // Remove if past player
+      // Deactivate if past player
       if (obj.z > 1.15) {
-        this.objects.splice(i, 1)
+        obj.active = false
         continue
       }
 
-      // Check collision using CONTINUOUS X position
+      // Check collision using CONTINUOUS X position (raw, no smoothing)
       if (!obj.collected && obj.z >= collisionZoneStart && obj.z <= collisionZoneEnd) {
         // Get object's X position (0-1 normalized based on lane)
         const objX = this.getLaneXNormalized(obj.lane)
-        const objHalfWidth = 0.07 // Object collision width - narrower for easier dodging
 
-        // Player collision bounds
+        // Scale object hitbox based on actual size
+        // Base sizes: obstacles=100, coins/gems=70
+        // Base hitbox half-width: 0.06 for obstacles, 0.05 for collectibles
+        const baseSize = obj.isCollectible ? 70 : 100
+        const baseHalfWidth = obj.isCollectible ? 0.05 : 0.06
+        const objHalfWidth = baseHalfWidth * (obj.size / baseSize)
+
+        // Player collision bounds (using RAW position - no center drift)
         const playerLeft = this.playerX - this.playerBodyWidth / 2
         const playerRight = this.playerX + this.playerBodyWidth / 2
         const objLeft = objX - objHalfWidth
@@ -158,7 +172,8 @@ export class RunnerGameState {
             this.spawnCollectParticles(obj)
           } else if (!this.player.isInvincible) {
             // Hit obstacle - check if jumping over it
-            if (this.player.isJumping && this.player.jumpProgress > 0.15 && this.player.jumpProgress < 0.85) {
+            // Widened window: 0.08-0.92 (84% of arc) for more forgiving jumps
+            if (this.player.isJumping && this.player.jumpProgress > 0.08 && this.player.jumpProgress < 0.92) {
               // Successfully jumped over!
             } else {
               // Crash!
@@ -204,15 +219,29 @@ export class RunnerGameState {
     // Obstacles are bigger, but coins/gems now more visible too
     const size = isObstacle ? 100 : 70
 
-    this.objects.push({
-      id: this.nextObjectId++,
-      type,
-      lane,
-      z: 0,
-      isCollectible: !isObstacle,
-      collected: false,
-      size
-    })
+    // Object pooling: reuse inactive object or create new if under limit
+    let obj = this.objects.find(o => !o.active)
+    if (obj) {
+      obj.id = this.nextObjectId++
+      obj.type = type
+      obj.lane = lane
+      obj.z = 0
+      obj.isCollectible = !isObstacle
+      obj.collected = false
+      obj.size = size
+      obj.active = true
+    } else if (this.objects.length < this.MAX_OBJECTS) {
+      this.objects.push({
+        id: this.nextObjectId++,
+        type,
+        lane,
+        z: 0,
+        isCollectible: !isObstacle,
+        collected: false,
+        size,
+        active: true
+      })
+    }
   }
 
   private spawnCollectParticles(obj: RunnerObject): void {
@@ -223,15 +252,31 @@ export class RunnerGameState {
 
     for (let i = 0; i < 10; i++) {
       const angle = (Math.PI * 2 * i) / 10
-      this.particles.push({
-        x,
-        y: this.config.canvasHeight * 0.75,
-        vx: Math.cos(angle) * 4,
-        vy: Math.sin(angle) * 4 - 3,
-        life: 1,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        size: 8
-      })
+      const color = colors[Math.floor(Math.random() * colors.length)]
+
+      // Object pooling: reuse inactive particle or create new if under limit
+      let particle = this.particles.find(p => !p.active)
+      if (particle) {
+        particle.x = x
+        particle.y = this.config.canvasHeight * 0.75
+        particle.vx = Math.cos(angle) * 4
+        particle.vy = Math.sin(angle) * 4 - 3
+        particle.life = 1
+        particle.color = color
+        particle.size = 8
+        particle.active = true
+      } else if (this.particles.length < this.MAX_PARTICLES) {
+        this.particles.push({
+          x,
+          y: this.config.canvasHeight * 0.75,
+          vx: Math.cos(angle) * 4,
+          vy: Math.sin(angle) * 4 - 3,
+          life: 1,
+          color,
+          size: 8,
+          active: true
+        })
+      }
     }
   }
 
@@ -242,15 +287,17 @@ export class RunnerGameState {
   }
 
   private updateParticles(): void {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
+    for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i]
+      if (!p.active) continue
+
       p.x += p.vx
       p.y += p.vy
       p.vy += 0.2
       p.life -= 0.035
 
       if (p.life <= 0) {
-        this.particles.splice(i, 1)
+        p.active = false
       }
     }
   }
@@ -270,7 +317,8 @@ export class RunnerGameState {
     this.lastLevelScore = 0
     this.nextObjectId = 0
     this.playerX = 0.5
-    this.playerBodyWidth = 0.2
+    this.playerXSmooth = 0.5
+    this.playerBodyWidth = 0.12
 
     this.config.speed = this.config.baseSpeed
     this.config.level = 1

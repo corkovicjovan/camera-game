@@ -16,6 +16,12 @@ export class RunnerRenderer {
   private static readonly LEVEL_FONT = 'bold 24px system-ui, -apple-system, sans-serif'
   private static readonly GAME_OVER_FONT = 'bold 72px system-ui, -apple-system, sans-serif'
 
+  // Screen shake
+  private shakeOffset = { x: 0, y: 0 }
+  private shakeIntensity = 0
+  private shakeDuration = 0
+  private shakeStartTime = 0
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
     const ctx = canvas.getContext('2d')
@@ -171,8 +177,8 @@ export class RunnerRenderer {
   }
 
   drawObjects(objects: RunnerObject[]): void {
-    // Sort by z so far objects render first
-    const sorted = [...objects].sort((a, b) => a.z - b.z)
+    // Sort by z so far objects render first (only active objects)
+    const sorted = [...objects].filter(o => o.active).sort((a, b) => a.z - b.z)
 
     for (const obj of sorted) {
       if (obj.collected) continue
@@ -260,6 +266,8 @@ export class RunnerRenderer {
 
   drawParticles(particles: RunnerParticle[]): void {
     for (const p of particles) {
+      if (!p.active) continue
+
       this.ctx.globalAlpha = p.life
       this.ctx.fillStyle = p.color
       this.ctx.beginPath()
@@ -275,7 +283,7 @@ export class RunnerRenderer {
     playerBodyWidth: number,
     collisionZoneStart: number,
     collisionZoneEnd: number,
-    objects: { lane: Lane; z: number; isCollectible: boolean; collected: boolean }[]
+    objects: { lane: Lane; z: number; isCollectible: boolean; collected: boolean; size: number }[]
   ): void {
     const width = this.cachedWidth
     const height = this.cachedHeight
@@ -292,12 +300,15 @@ export class RunnerRenderer {
     this.ctx.strokeRect(playerLeft, boxTop, playerRight - playerLeft, boxBottom - boxTop)
     this.ctx.setLineDash([])
 
-    // Draw object collision boxes
-    const objHalfWidth = 0.07
+    // Draw object collision boxes (with actual scaled sizes)
     for (const obj of objects) {
       if (obj.collected) continue
       if (obj.z >= collisionZoneStart && obj.z <= collisionZoneEnd) {
-        // Object is in collision zone - highlight it
+        // Scale object hitbox based on actual size (matches collision logic)
+        const baseSize = obj.isCollectible ? 70 : 100
+        const baseHalfWidth = obj.isCollectible ? 0.05 : 0.06
+        const objHalfWidth = baseHalfWidth * (obj.size / baseSize)
+
         const objX = this.getLaneXNormalized(obj.lane)
         const objLeft = (objX - objHalfWidth) * width
         const objRight = (objX + objHalfWidth) * width
@@ -313,7 +324,7 @@ export class RunnerRenderer {
     this.ctx.font = '14px monospace'
     this.ctx.fillStyle = 'lime'
     this.ctx.textAlign = 'left'
-    this.ctx.fillText(`Player X: ${playerX.toFixed(2)}`, 10, height - 60)
+    this.ctx.fillText(`Player X: ${playerX.toFixed(2)} (raw)`, 10, height - 60)
     this.ctx.fillText(`Width: ${playerBodyWidth.toFixed(2)}`, 10, height - 40)
     this.ctx.fillText(`Zone: ${collisionZoneStart}-${collisionZoneEnd}`, 10, height - 20)
   }
@@ -383,6 +394,14 @@ export class RunnerRenderer {
     this.ctx.fillText(`Level ${level}`, width - 20, 25)
   }
 
+  drawHighScore(highScore: number): void {
+    this.ctx.font = 'bold 18px system-ui, -apple-system, sans-serif'
+    this.ctx.textAlign = 'center'
+    this.ctx.textBaseline = 'top'
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'
+    this.ctx.fillText(`HIGH: ${highScore}`, this.cachedWidth / 2, 70)
+  }
+
   private drawHeart(x: number, y: number, size: number, color: string): void {
     this.ctx.fillStyle = color
     this.ctx.beginPath()
@@ -393,7 +412,7 @@ export class RunnerRenderer {
     this.ctx.fill()
   }
 
-  drawGameOver(score: number, level: number): void {
+  drawGameOver(score: number, level: number, isNewHighScore: boolean = false): void {
     const width = this.cachedWidth
     const height = this.cachedHeight
 
@@ -411,6 +430,16 @@ export class RunnerRenderer {
     this.ctx.strokeText('Game Over!', width / 2, height * 0.35)
     this.ctx.fillText('Game Over!', width / 2, height * 0.35)
 
+    // New High Score celebration
+    if (isNewHighScore) {
+      this.ctx.font = 'bold 28px system-ui'
+      this.ctx.fillStyle = '#FFD700'
+      this.ctx.strokeStyle = '#FF6B00'
+      this.ctx.lineWidth = 2
+      this.ctx.strokeText('NEW HIGH SCORE!', width / 2, height * 0.43)
+      this.ctx.fillText('NEW HIGH SCORE!', width / 2, height * 0.43)
+    }
+
     // Score
     this.ctx.font = 'bold 36px system-ui'
     this.ctx.fillStyle = '#FFD700'
@@ -421,10 +450,93 @@ export class RunnerRenderer {
     this.ctx.fillStyle = '#9B59B6'
     this.ctx.fillText(`Level ${level}`, width / 2, height * 0.58)
 
+    // Star rating: 1 star = 100pts, 2 stars = 300pts, 3 stars = 500pts
+    const stars = score >= 500 ? 3 : score >= 300 ? 2 : score >= 100 ? 1 : 0
+    this.drawStarRating(width / 2, height * 0.64, stars)
+
     // Encouragement
     this.ctx.font = 'bold 28px system-ui'
     this.ctx.fillStyle = 'white'
-    this.ctx.fillText('Great try!', width / 2, height * 0.7)
+    this.ctx.fillText(isNewHighScore ? 'Amazing!' : 'Great try!', width / 2, height * 0.72)
+  }
+
+  private drawStarRating(x: number, y: number, earnedStars: number): void {
+    const starSize = 30
+    const gap = 10
+    const totalWidth = 3 * starSize + 2 * gap
+    const startX = x - totalWidth / 2 + starSize / 2
+
+    for (let i = 0; i < 3; i++) {
+      const starX = startX + i * (starSize + gap)
+      const earned = i < earnedStars
+      this.drawStar(starX, y, starSize, earned)
+    }
+  }
+
+  private drawStar(x: number, y: number, size: number, filled: boolean): void {
+    this.ctx.save()
+    this.ctx.translate(x, y)
+
+    const outerRadius = size / 2
+    const innerRadius = outerRadius * 0.4
+    const points = 5
+
+    this.ctx.beginPath()
+    for (let i = 0; i < points * 2; i++) {
+      const radius = i % 2 === 0 ? outerRadius : innerRadius
+      const angle = (Math.PI / 2) + (i * Math.PI / points)
+      const px = Math.cos(angle) * radius
+      const py = -Math.sin(angle) * radius
+      if (i === 0) {
+        this.ctx.moveTo(px, py)
+      } else {
+        this.ctx.lineTo(px, py)
+      }
+    }
+    this.ctx.closePath()
+
+    if (filled) {
+      this.ctx.fillStyle = '#FFD700'
+      this.ctx.strokeStyle = '#FFA500'
+    } else {
+      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'
+      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
+    }
+    this.ctx.lineWidth = 2
+    this.ctx.fill()
+    this.ctx.stroke()
+
+    this.ctx.restore()
+  }
+
+  triggerShake(intensity: number, duration: number): void {
+    this.shakeIntensity = intensity
+    this.shakeDuration = duration
+    this.shakeStartTime = performance.now()
+  }
+
+  private updateShake(): void {
+    if (this.shakeIntensity <= 0) {
+      this.shakeOffset.x = 0
+      this.shakeOffset.y = 0
+      return
+    }
+
+    const elapsed = performance.now() - this.shakeStartTime
+    if (elapsed >= this.shakeDuration) {
+      this.shakeIntensity = 0
+      this.shakeOffset.x = 0
+      this.shakeOffset.y = 0
+      return
+    }
+
+    // Linear decay
+    const progress = elapsed / this.shakeDuration
+    const currentIntensity = this.shakeIntensity * (1 - progress)
+
+    // Random offset
+    this.shakeOffset.x = (Math.random() - 0.5) * 2 * currentIntensity
+    this.shakeOffset.y = (Math.random() - 0.5) * 2 * currentIntensity
   }
 
   render(
@@ -433,14 +545,24 @@ export class RunnerRenderer {
     objects: RunnerObject[],
     particles: RunnerParticle[],
     score: number,
-    playerX?: number
+    playerX?: number,
+    highScore: number = 0
   ): void {
+    // Update and apply screen shake
+    this.updateShake()
+
+    this.ctx.save()
+    this.ctx.translate(this.shakeOffset.x, this.shakeOffset.y)
+
     this.clear()
     this.drawTrack()
     this.drawObjects(objects)
     this.drawParticles(particles)
     this.drawPlayer(config, player, playerX)
     this.drawHUD(score, config.lives, config.level)
+    this.drawHighScore(highScore)
     this.drawBackButton()
+
+    this.ctx.restore()
   }
 }

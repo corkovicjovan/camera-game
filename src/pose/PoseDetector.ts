@@ -1,16 +1,28 @@
 import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 
 export interface BodyBounds {
-  centerX: number    // 0-1 normalized
-  leftEdge: number   // 0-1 normalized
-  rightEdge: number  // 0-1 normalized
-  headY: number      // 0-1 normalized (top of head position)
+  // Smoothed values (for visual rendering - no jitter)
+  centerX: number    // 0-1 normalized, smoothed
+  leftEdge: number   // 0-1 normalized, smoothed
+  rightEdge: number  // 0-1 normalized, smoothed
+  headY: number      // 0-1 normalized (top of head position), smoothed
+
+  // Raw values (for collision - immediate response, no center drift)
+  rawCenterX: number   // 0-1 normalized, unsmoothed
+  rawLeftEdge: number  // 0-1 normalized, unsmoothed
+  rawRightEdge: number // 0-1 normalized, unsmoothed
+  rawBodyWidth: number // actual detected body width (0-1)
+
   isJumping: boolean // true when both hands raised above shoulders
 }
 
 export class PoseDetector {
   private poseLandmarker: PoseLandmarker | null = null
-  private lastBounds: BodyBounds = { centerX: 0.5, leftEdge: 0.4, rightEdge: 0.6, headY: 0.4, isJumping: false }
+  private lastBounds: BodyBounds = {
+    centerX: 0.5, leftEdge: 0.4, rightEdge: 0.6, headY: 0.4,
+    rawCenterX: 0.5, rawLeftEdge: 0.4, rawRightEdge: 0.6, rawBodyWidth: 0.2,
+    isJumping: false
+  }
   private jumpCooldown: number = 0
   private readonly JUMP_COOLDOWN_MS: number = 500
   private smoothingFactor: number = 0.7
@@ -18,7 +30,7 @@ export class PoseDetector {
   private animationId: number | null = null
   private onPositionUpdate: ((bounds: BodyBounds) => void) | null = null
   private frameCounter: number = 0
-  private skipFrames: number = 4 // Process every 4th frame (~15fps at 60fps)
+  private skipFrames: number = 6 // Process every 6th frame (~10fps at 60fps)
 
   async init(): Promise<void> {
     const vision = await FilesetResolver.forVisionTasks(
@@ -116,11 +128,22 @@ export class PoseDetector {
               }
             }
 
+            // Calculate raw body width from shoulder detection
+            const rawBodyWidth = Math.abs(rawRight - rawLeft)
+
             this.lastBounds = {
+              // Smoothed values for visual rendering
               centerX: smoothedCenter,
               leftEdge: Math.max(0, smoothedLeft),
               rightEdge: Math.min(1, smoothedRight),
-              headY: Math.max(0.1, Math.min(0.8, smoothedHeadY)), // Clamp to reasonable range
+              headY: Math.max(0.1, Math.min(0.8, smoothedHeadY)),
+
+              // Raw values for collision (no smoothing = immediate response)
+              rawCenterX: Math.max(0, Math.min(1, rawCenterX)),
+              rawLeftEdge: Math.max(0, rawLeft),
+              rawRightEdge: Math.min(1, rawRight),
+              rawBodyWidth: rawBodyWidth,
+
               isJumping
             }
 
