@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# BMAD method files
+_bmad/
+.claude/commands/bmad/
