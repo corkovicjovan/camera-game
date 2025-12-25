@@ -5,11 +5,14 @@ export interface BodyBounds {
   leftEdge: number   // 0-1 normalized
   rightEdge: number  // 0-1 normalized
   headY: number      // 0-1 normalized (top of head position)
+  isJumping: boolean // true when both hands raised above shoulders
 }
 
 export class PoseDetector {
   private poseLandmarker: PoseLandmarker | null = null
-  private lastBounds: BodyBounds = { centerX: 0.5, leftEdge: 0.4, rightEdge: 0.6, headY: 0.4 }
+  private lastBounds: BodyBounds = { centerX: 0.5, leftEdge: 0.4, rightEdge: 0.6, headY: 0.4, isJumping: false }
+  private jumpCooldown: number = 0
+  private readonly JUMP_COOLDOWN_MS: number = 500
   private smoothingFactor: number = 0.7
   private isRunning: boolean = false
   private animationId: number | null = null
@@ -67,10 +70,8 @@ export class PoseDetector {
           const nose = landmarks[0]
           const leftShoulder = landmarks[11]
           const rightShoulder = landmarks[12]
-          const leftHip = landmarks[23]
-          const rightHip = landmarks[24]
-          const leftElbow = landmarks[13]
-          const rightElbow = landmarks[14]
+          const leftWrist = landmarks[15]
+          const rightWrist = landmarks[16]
 
           if (leftShoulder && rightShoulder && nose) {
             // Calculate center from shoulders and mirror for natural movement
@@ -98,11 +99,29 @@ export class PoseDetector {
             const smoothedHeadY = this.lastBounds.headY * keepFactor +
                                   rawHeadY * this.smoothingFactor
 
+            // Detect jump: both wrists above both shoulders
+            // Use a threshold to make it easier for kids (wrists just need to be near shoulder height)
+            const now = performance.now()
+            let isJumping = false
+
+            if (leftWrist && rightWrist) {
+              const shoulderY = (leftShoulder.y + rightShoulder.y) / 2
+              const jumpThreshold = 0.05 // Wrists can be slightly below shoulders and still count
+              const bothHandsUp = leftWrist.y < (shoulderY + jumpThreshold) &&
+                                  rightWrist.y < (shoulderY + jumpThreshold)
+
+              if (bothHandsUp && now > this.jumpCooldown) {
+                isJumping = true
+                this.jumpCooldown = now + this.JUMP_COOLDOWN_MS
+              }
+            }
+
             this.lastBounds = {
               centerX: smoothedCenter,
               leftEdge: Math.max(0, smoothedLeft),
               rightEdge: Math.min(1, smoothedRight),
-              headY: Math.max(0.1, Math.min(0.8, smoothedHeadY)) // Clamp to reasonable range
+              headY: Math.max(0.1, Math.min(0.8, smoothedHeadY)), // Clamp to reasonable range
+              isJumping
             }
 
             if (this.onPositionUpdate) {

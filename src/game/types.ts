@@ -67,3 +67,65 @@ export const DEFAULT_CONFIG: Omit<GameConfig, 'catchZoneY' | 'catchZoneHeight' |
   objectSize: 70,            // Slightly smaller objects
   goodObjectChance: 0.8      // More good objects for fun
 }
+
+// ============================================
+// Runner Mode Types
+// ============================================
+
+export type GameMode = 'stars' | 'runner'
+
+export type Lane = 0 | 1 | 2
+
+export type RunnerObjectType = 'coin' | 'gem' | 'barrier' | 'rock'
+
+export interface RunnerObject {
+  id: number
+  type: RunnerObjectType
+  lane: Lane
+  z: number              // Depth 0-1 (0 = far/top, 1 = near/bottom)
+  isCollectible: boolean
+  collected: boolean
+  size: number
+}
+
+export interface RunnerPlayerState {
+  lane: Lane
+  targetLane: Lane       // For smooth lane transitions
+  laneProgress: number   // 0-1 interpolation between lanes
+  isJumping: boolean
+  jumpProgress: number   // 0-1 for jump animation
+  isInvincible: boolean
+  invincibleUntil: number
+}
+
+export interface RunnerGameConfig {
+  speed: number          // Current speed multiplier
+  baseSpeed: number      // Starting speed
+  spawnInterval: number  // ms between spawns
+  lives: number
+  maxLives: number
+  level: number
+  obstacleChance: number // 0-1 probability of obstacle vs collectible
+  canvasWidth: number
+  canvasHeight: number
+}
+
+export interface RunnerParticle {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  life: number
+  color: string
+  size: number
+}
+
+export const DEFAULT_RUNNER_CONFIG: Omit<RunnerGameConfig, 'canvasWidth' | 'canvasHeight'> = {
+  speed: 1.0,
+  baseSpeed: 1.0,
+  spawnInterval: 1500,
+  lives: 3,
+  maxLives: 3,
+  level: 1,
+  obstacleChance: 0.2
+}
