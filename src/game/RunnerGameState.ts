@@ -22,11 +22,15 @@ export class RunnerGameState {
   particles: RunnerParticle[] = []
   config: RunnerGameConfig
 
+  // Continuous player X position (0-1 normalized) - tracks actual body
+  playerX: number = 0.5
+  playerBodyWidth: number = 0.12 // Narrower collision for easier dodging
+
   private nextObjectId: number = 0
   private lastSpawnTime: number = 0
   private lastLevelScore: number = 0
   private readonly LEVEL_UP_SCORE = 500
-  private readonly JUMP_DURATION = 600 // ms
+  private readonly JUMP_DURATION = 700 // ms - slightly longer for visibility
   private jumpStartTime: number = 0
 
   constructor(canvasWidth: number, canvasHeight: number) {
@@ -37,7 +41,7 @@ export class RunnerGameState {
     }
 
     this.player = {
-      lane: 1 as Lane, // Start in center
+      lane: 1 as Lane,
       targetLane: 1 as Lane,
       laneProgress: 0,
       isJumping: false,
@@ -52,9 +56,18 @@ export class RunnerGameState {
     this.config.canvasHeight = height
   }
 
-  setPlayerLane(centerX: number): void {
-    // Map body center position to lane
-    // Left: 0-0.33, Center: 0.33-0.66, Right: 0.66-1
+  // Now takes actual body position instead of mapping to lanes
+  setPlayerPosition(centerX: number, _bodyWidth: number): void {
+    this.playerX = centerX
+
+    // Use a fixed narrow width for collision (easier to dodge)
+    // But shrink it slightly more when near edges to make side dodges easier
+    const distFromCenter = Math.abs(centerX - 0.5)
+    const baseWidth = 0.10 // Narrow base collision
+    const edgeShrink = distFromCenter * 0.08 // Shrink more when at edges
+    this.playerBodyWidth = Math.max(0.06, baseWidth - edgeShrink)
+
+    // Still update lane for compatibility, but collision uses continuous X
     let newLane: Lane
     if (centerX < 0.33) {
       newLane = 0
@@ -63,19 +76,8 @@ export class RunnerGameState {
     } else {
       newLane = 1
     }
-
-    if (newLane !== this.player.targetLane) {
-      this.player.targetLane = newLane
-    }
-
-    // Smooth lane transition
-    if (this.player.lane !== this.player.targetLane) {
-      this.player.laneProgress += 0.15
-      if (this.player.laneProgress >= 1) {
-        this.player.lane = this.player.targetLane
-        this.player.laneProgress = 0
-      }
-    }
+    this.player.lane = newLane
+    this.player.targetLane = newLane
   }
 
   triggerJump(now: number): void {
@@ -116,26 +118,37 @@ export class RunnerGameState {
       this.lastSpawnTime = currentTime
     }
 
-    // Update objects (move toward player)
-    const speed = this.config.speed * 0.015 // Base movement per frame
-    const collisionZone = 0.85 // Where player is (near bottom)
+    // Update objects (move toward player) - SLOWER for kids
+    const speed = this.config.speed * 0.006 // Much slower movement
+    const collisionZoneStart = 0.80
+    const collisionZoneEnd = 0.95
 
     for (let i = this.objects.length - 1; i >= 0; i--) {
       const obj = this.objects[i]
       obj.z += speed
 
       // Remove if past player
-      if (obj.z > 1.1) {
+      if (obj.z > 1.15) {
         this.objects.splice(i, 1)
         continue
       }
 
-      // Check collision
-      if (!obj.collected && obj.z >= collisionZone - 0.1 && obj.z <= collisionZone + 0.05) {
-        const sameOrNearLane = obj.lane === this.player.lane ||
-          (this.player.laneProgress > 0.5 && obj.lane === this.player.targetLane)
+      // Check collision using CONTINUOUS X position
+      if (!obj.collected && obj.z >= collisionZoneStart && obj.z <= collisionZoneEnd) {
+        // Get object's X position (0-1 normalized based on lane)
+        const objX = this.getLaneXNormalized(obj.lane)
+        const objHalfWidth = 0.12 // Object collision width
 
-        if (sameOrNearLane) {
+        // Player collision bounds
+        const playerLeft = this.playerX - this.playerBodyWidth / 2
+        const playerRight = this.playerX + this.playerBodyWidth / 2
+        const objLeft = objX - objHalfWidth
+        const objRight = objX + objHalfWidth
+
+        // Check horizontal overlap
+        const horizontalOverlap = playerRight > objLeft && playerLeft < objRight
+
+        if (horizontalOverlap) {
           if (obj.isCollectible) {
             // Collect coin/gem
             obj.collected = true
@@ -143,12 +156,12 @@ export class RunnerGameState {
             result.collected.push(obj)
             this.spawnCollectParticles(obj)
           } else if (!this.player.isInvincible) {
-            // Hit obstacle - check if jumping
-            if (this.player.isJumping && this.player.jumpProgress > 0.1 && this.player.jumpProgress < 0.9) {
+            // Hit obstacle - check if jumping over it
+            if (this.player.isJumping && this.player.jumpProgress > 0.15 && this.player.jumpProgress < 0.85) {
               // Successfully jumped over!
             } else {
               // Crash!
-              obj.collected = true // Mark as handled
+              obj.collected = true
               this.config.lives--
               this.player.isInvincible = true
               this.player.invincibleUntil = currentTime + 1500
@@ -187,40 +200,44 @@ export class RunnerGameState {
       type = Math.random() < 0.8 ? 'coin' : 'gem'
     }
 
+    // Obstacles are bigger
+    const size = isObstacle ? 90 : 45
+
     this.objects.push({
       id: this.nextObjectId++,
       type,
       lane,
-      z: 0, // Start at far end
+      z: 0,
       isCollectible: !isObstacle,
       collected: false,
-      size: 40
+      size
     })
   }
 
   private spawnCollectParticles(obj: RunnerObject): void {
-    const laneX = this.getLaneX(obj.lane)
+    const x = this.getLaneXNormalized(obj.lane) * this.config.canvasWidth
     const colors = obj.type === 'gem'
       ? ['#FF69B4', '#9B59B6', '#3498DB', '#2ECC71']
       : ['#FFD700', '#FFA500', '#FFFF00']
 
-    for (let i = 0; i < 8; i++) {
-      const angle = (Math.PI * 2 * i) / 8
+    for (let i = 0; i < 10; i++) {
+      const angle = (Math.PI * 2 * i) / 10
       this.particles.push({
-        x: laneX,
+        x,
         y: this.config.canvasHeight * 0.75,
-        vx: Math.cos(angle) * 3,
-        vy: Math.sin(angle) * 3 - 2,
+        vx: Math.cos(angle) * 4,
+        vy: Math.sin(angle) * 4 - 3,
         life: 1,
         color: colors[Math.floor(Math.random() * colors.length)],
-        size: 6
+        size: 8
       })
     }
   }
 
-  private getLaneX(lane: Lane): number {
-    const laneWidth = this.config.canvasWidth / 3
-    return laneWidth * lane + laneWidth / 2
+  // Returns normalized X (0-1) for a lane
+  private getLaneXNormalized(lane: Lane): number {
+    // Left lane = 0.2, Center = 0.5, Right = 0.8
+    return 0.2 + lane * 0.3
   }
 
   private updateParticles(): void {
@@ -228,8 +245,8 @@ export class RunnerGameState {
       const p = this.particles[i]
       p.x += p.vx
       p.y += p.vy
-      p.vy += 0.15
-      p.life -= 0.04
+      p.vy += 0.2
+      p.life -= 0.035
 
       if (p.life <= 0) {
         this.particles.splice(i, 1)
@@ -239,9 +256,9 @@ export class RunnerGameState {
 
   private levelUp(): void {
     this.config.level++
-    this.config.speed += 0.1
-    this.config.spawnInterval = Math.max(800, this.config.spawnInterval - 100)
-    this.config.obstacleChance = Math.min(0.4, this.config.obstacleChance + 0.05)
+    this.config.speed += 0.08
+    this.config.spawnInterval = Math.max(900, this.config.spawnInterval - 80)
+    this.config.obstacleChance = Math.min(0.35, this.config.obstacleChance + 0.03)
   }
 
   reset(): void {
@@ -251,6 +268,8 @@ export class RunnerGameState {
     this.lastSpawnTime = 0
     this.lastLevelScore = 0
     this.nextObjectId = 0
+    this.playerX = 0.5
+    this.playerBodyWidth = 0.2
 
     this.config.speed = this.config.baseSpeed
     this.config.level = 1

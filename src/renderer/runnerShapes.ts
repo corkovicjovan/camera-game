@@ -82,24 +82,34 @@ export function drawBarrier(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.save()
   ctx.translate(x, y)
 
-  const barWidth = size * 1.5
-  const barHeight = size * 0.8
+  // BIGGER barrier - more prominent
+  const barWidth = size * 2.0
+  const barHeight = size * 1.2
 
-  // Candy cane striped barrier
-  ctx.fillStyle = '#FF6B6B'
+  // Shadow for depth
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
+  ctx.fillRect(-barWidth / 2 + 4, -barHeight / 2 + 4, barWidth, barHeight)
+
+  // Candy cane striped barrier - BRIGHT RED
+  ctx.fillStyle = '#FF3333'
   ctx.fillRect(-barWidth / 2, -barHeight / 2, barWidth, barHeight)
 
-  // Stripes
+  // White stripes
   ctx.fillStyle = 'white'
   const stripeWidth = barWidth / 6
   for (let i = 0; i < 3; i++) {
     ctx.fillRect(-barWidth / 2 + stripeWidth * (i * 2 + 1), -barHeight / 2, stripeWidth, barHeight)
   }
 
+  // Bold border
+  ctx.strokeStyle = '#CC0000'
+  ctx.lineWidth = 3
+  ctx.strokeRect(-barWidth / 2, -barHeight / 2, barWidth, barHeight)
+
   // Posts
-  ctx.fillStyle = '#8B4513'
-  ctx.fillRect(-barWidth / 2 - 5, -barHeight / 2, 8, barHeight + 10)
-  ctx.fillRect(barWidth / 2 - 3, -barHeight / 2, 8, barHeight + 10)
+  ctx.fillStyle = '#654321'
+  ctx.fillRect(-barWidth / 2 - 8, -barHeight / 2 - 5, 12, barHeight + 20)
+  ctx.fillRect(barWidth / 2 - 4, -barHeight / 2 - 5, 12, barHeight + 20)
 
   ctx.restore()
 }
@@ -108,26 +118,39 @@ export function drawRock(ctx: CanvasRenderingContext2D, x: number, y: number, si
   ctx.save()
   ctx.translate(x, y)
 
-  // Main rock body - cartoon boulder
-  ctx.fillStyle = '#7F8C8D'
+  // Shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
   ctx.beginPath()
-  ctx.ellipse(0, 0, size * 0.6, size * 0.5, 0, 0, Math.PI * 2)
+  ctx.ellipse(4, 4, size * 0.8, size * 0.65, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Main rock body - BIGGER cartoon boulder
+  ctx.fillStyle = '#5D6D7E'
+  ctx.beginPath()
+  ctx.ellipse(0, 0, size * 0.8, size * 0.65, 0, 0, Math.PI * 2)
   ctx.fill()
 
   // Darker shading
-  ctx.fillStyle = '#5D6D7E'
+  ctx.fillStyle = '#4A5568'
   ctx.beginPath()
-  ctx.ellipse(size * 0.1, size * 0.1, size * 0.4, size * 0.35, 0, 0, Math.PI * 2)
+  ctx.ellipse(size * 0.15, size * 0.15, size * 0.55, size * 0.45, 0, 0, Math.PI * 2)
   ctx.fill()
 
   // Highlight
-  ctx.fillStyle = '#95A5A6'
+  ctx.fillStyle = '#718096'
   ctx.beginPath()
-  ctx.ellipse(-size * 0.15, -size * 0.15, size * 0.2, size * 0.15, -0.5, 0, Math.PI * 2)
+  ctx.ellipse(-size * 0.2, -size * 0.2, size * 0.3, size * 0.2, -0.5, 0, Math.PI * 2)
   ctx.fill()
 
-  // Googly eyes!
-  const eyeSize = size * 0.15
+  // Bold outline
+  ctx.strokeStyle = '#2D3748'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.ellipse(0, 0, size * 0.8, size * 0.65, 0, 0, Math.PI * 2)
+  ctx.stroke()
+
+  // Googly eyes - BIGGER!
+  const eyeSize = size * 0.2
 
   // Left eye white
   ctx.fillStyle = 'white'

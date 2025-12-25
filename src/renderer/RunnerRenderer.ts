@@ -160,7 +160,7 @@ export class RunnerRenderer {
     return vanishX + (bottomX - vanishX) * z
   }
 
-  private getYFromZ(z: number): number {
+  getYFromZ(z: number): number {
     const height = this.cachedHeight
     const vanishY = height * 0.15
     return vanishY + (height - vanishY) * z
@@ -198,22 +198,31 @@ export class RunnerRenderer {
     }
   }
 
-  drawPlayer(_config: RunnerGameConfig, player: RunnerPlayerState): void {
+  drawPlayer(_config: RunnerGameConfig, player: RunnerPlayerState, playerX?: number): void {
+    const width = this.cachedWidth
     const height = this.cachedHeight
 
-    // Calculate player position
-    let currentLane = player.lane
-    if (player.laneProgress > 0) {
-      // Interpolate between lanes during transition
-      currentLane = player.lane + (player.targetLane - player.lane) * player.laneProgress as Lane
+    // Use actual body position if provided, otherwise calculate from lane
+    let x: number
+    if (playerX !== undefined) {
+      // Direct body position - most natural!
+      x = playerX * width
+    } else {
+      // Fallback to lane-based
+      let currentLane = player.lane
+      if (player.laneProgress > 0) {
+        currentLane = player.lane + (player.targetLane - player.lane) * player.laneProgress as Lane
+      }
+      const centerX = width / 2
+      const laneOffset = width * 0.15
+      x = centerX + (currentLane - 1) * laneOffset
     }
 
-    const x = this.getLaneX(Math.round(currentLane) as Lane, 0.9)
-    let y = height * 0.82
+    let y = height * 0.78
 
     // Jump animation - arc up and down
     if (player.isJumping) {
-      const jumpHeight = 80
+      const jumpHeight = 100
       const jumpArc = Math.sin(player.jumpProgress * Math.PI)
       y -= jumpHeight * jumpArc
     }
@@ -258,6 +267,60 @@ export class RunnerRenderer {
       this.ctx.fill()
     }
     this.ctx.globalAlpha = 1
+  }
+
+  // Debug: visualize collision zones
+  drawDebugCollision(
+    playerX: number,
+    playerBodyWidth: number,
+    collisionZoneStart: number,
+    collisionZoneEnd: number,
+    objects: { lane: Lane; z: number; isCollectible: boolean; collected: boolean }[]
+  ): void {
+    const width = this.cachedWidth
+    const height = this.cachedHeight
+
+    // Player collision box (green)
+    const playerLeft = (playerX - playerBodyWidth / 2) * width
+    const playerRight = (playerX + playerBodyWidth / 2) * width
+    const zoneStartY = this.getYFromZ(collisionZoneStart)
+    const zoneEndY = this.getYFromZ(collisionZoneEnd)
+
+    this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)'
+    this.ctx.lineWidth = 3
+    this.ctx.setLineDash([5, 5])
+    this.ctx.strokeRect(playerLeft, zoneStartY, playerRight - playerLeft, zoneEndY - zoneStartY)
+    this.ctx.setLineDash([])
+
+    // Draw object collision boxes
+    const objHalfWidth = 0.12
+    for (const obj of objects) {
+      if (obj.collected) continue
+      if (obj.z >= collisionZoneStart && obj.z <= collisionZoneEnd) {
+        // Object is in collision zone - highlight it
+        const objX = this.getLaneXNormalized(obj.lane)
+        const objLeft = (objX - objHalfWidth) * width
+        const objRight = (objX + objHalfWidth) * width
+        const objY = this.getYFromZ(obj.z)
+
+        this.ctx.strokeStyle = obj.isCollectible ? 'rgba(255, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)'
+        this.ctx.lineWidth = 2
+        this.ctx.strokeRect(objLeft, objY - 30, objRight - objLeft, 60)
+      }
+    }
+
+    // Label
+    this.ctx.font = '14px monospace'
+    this.ctx.fillStyle = 'lime'
+    this.ctx.textAlign = 'left'
+    this.ctx.fillText(`Player X: ${playerX.toFixed(2)}`, 10, height - 60)
+    this.ctx.fillText(`Width: ${playerBodyWidth.toFixed(2)}`, 10, height - 40)
+    this.ctx.fillText(`Zone: ${collisionZoneStart}-${collisionZoneEnd}`, 10, height - 20)
+  }
+
+  // Expose lane X calculation for debug
+  private getLaneXNormalized(lane: Lane): number {
+    return 0.2 + lane * 0.3
   }
 
   drawHUD(score: number, lives: number, level: number): void {
@@ -342,13 +405,14 @@ export class RunnerRenderer {
     player: RunnerPlayerState,
     objects: RunnerObject[],
     particles: RunnerParticle[],
-    score: number
+    score: number,
+    playerX?: number
   ): void {
     this.clear()
     this.drawTrack()
     this.drawObjects(objects)
     this.drawParticles(particles)
-    this.drawPlayer(config, player)
+    this.drawPlayer(config, player, playerX)
     this.drawHUD(score, config.lives, config.level)
   }
 }
