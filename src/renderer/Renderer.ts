@@ -349,6 +349,33 @@ export class Renderer {
     this.ctx.fillText(score.toString(), centerX, centerY)
   }
 
+  // Back button dimensions for hit testing
+  getBackButtonBounds(): { x: number; y: number; width: number; height: number } {
+    return { x: 15, y: 15, width: 100, height: 40 }
+  }
+
+  drawBackButton(): void {
+    const { x, y, width, height } = this.getBackButtonBounds()
+
+    // Button background
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+    this.ctx.beginPath()
+    this.ctx.roundRect(x, y, width, height, 10)
+    this.ctx.fill()
+
+    // Button border
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'
+    this.ctx.lineWidth = 2
+    this.ctx.stroke()
+
+    // Arrow and text
+    this.ctx.fillStyle = 'white'
+    this.ctx.font = 'bold 18px system-ui, -apple-system, sans-serif'
+    this.ctx.textAlign = 'center'
+    this.ctx.textBaseline = 'middle'
+    this.ctx.fillText('← Back', x + width / 2, y + height / 2)
+  }
+
   render(
     config: GameConfig,
     player: PlayerState,
@@ -366,5 +393,6 @@ export class Renderer {
     this.drawPlayer(config, player)
     this.drawScore(score)
     this.drawCombo(combo)
+    this.drawBackButton()
   }
 }

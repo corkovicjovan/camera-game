@@ -323,6 +323,33 @@ export class RunnerRenderer {
     return 0.2 + lane * 0.3
   }
 
+  // Back button dimensions for hit testing
+  getBackButtonBounds(): { x: number; y: number; width: number; height: number } {
+    return { x: 15, y: 70, width: 100, height: 40 } // Below lives
+  }
+
+  drawBackButton(): void {
+    const { x, y, width, height } = this.getBackButtonBounds()
+
+    // Button background
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+    this.ctx.beginPath()
+    this.ctx.roundRect(x, y, width, height, 10)
+    this.ctx.fill()
+
+    // Button border
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'
+    this.ctx.lineWidth = 2
+    this.ctx.stroke()
+
+    // Arrow and text
+    this.ctx.fillStyle = 'white'
+    this.ctx.font = 'bold 18px system-ui, -apple-system, sans-serif'
+    this.ctx.textAlign = 'center'
+    this.ctx.textBaseline = 'middle'
+    this.ctx.fillText('← Back', x + width / 2, y + height / 2)
+  }
+
   drawHUD(score: number, lives: number, level: number): void {
     const width = this.cachedWidth
 
@@ -414,5 +441,6 @@ export class RunnerRenderer {
     this.drawParticles(particles)
     this.drawPlayer(config, player, playerX)
     this.drawHUD(score, config.lives, config.level)
+    this.drawBackButton()
   }
 }

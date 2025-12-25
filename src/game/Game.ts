@@ -72,6 +72,29 @@ export class Game {
       }
     })
 
+    // Back button click handler for both modes
+    this.canvas.addEventListener('click', (e) => {
+      if (this.phase === 'PLAYING') {
+        const rect = this.canvas.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+
+        if (this.gameMode === 'stars') {
+          const bounds = this.starsRenderer.getBackButtonBounds()
+          if (x >= bounds.x && x <= bounds.x + bounds.width &&
+              y >= bounds.y && y <= bounds.y + bounds.height) {
+            this.goToModeSelect()
+          }
+        } else if (!this.isRunnerGameOver) {
+          const bounds = this.runnerRenderer.getBackButtonBounds()
+          if (x >= bounds.x && x <= bounds.x + bounds.width &&
+              y >= bounds.y && y <= bounds.y + bounds.height) {
+            this.goToModeSelect()
+          }
+        }
+      }
+    })
+
     // Initialize both game states
     this.starsState = new GameState(this.starsRenderer.getWidth(), this.starsRenderer.getHeight())
     this.runnerState = new RunnerGameState(this.runnerRenderer.getWidth(), this.runnerRenderer.getHeight())
