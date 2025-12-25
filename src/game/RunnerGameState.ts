@@ -120,8 +120,9 @@ export class RunnerGameState {
 
     // Update objects (move toward player) - SLOWER for kids
     const speed = this.config.speed * 0.006 // Much slower movement
-    const collisionZoneStart = 0.80
-    const collisionZoneEnd = 0.95
+    // Collision zone moved up to match head/face position
+    const collisionZoneStart = 0.55
+    const collisionZoneEnd = 0.75
 
     for (let i = this.objects.length - 1; i >= 0; i--) {
       const obj = this.objects[i]
@@ -200,8 +201,8 @@ export class RunnerGameState {
       type = Math.random() < 0.8 ? 'coin' : 'gem'
     }
 
-    // Obstacles are bigger
-    const size = isObstacle ? 90 : 45
+    // Obstacles are bigger, but coins/gems now more visible too
+    const size = isObstacle ? 100 : 70
 
     this.objects.push({
       id: this.nextObjectId++,

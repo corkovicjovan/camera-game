@@ -437,8 +437,8 @@ export class Game {
       this.runnerRenderer.drawDebugCollision(
         this.runnerState.playerX,
         this.runnerState.playerBodyWidth,
-        0.80, // collisionZoneStart
-        0.95, // collisionZoneEnd
+        0.55, // collisionZoneStart - matches head position
+        0.75, // collisionZoneEnd
         this.runnerState.objects
       )
     }

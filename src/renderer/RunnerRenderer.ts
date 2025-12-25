@@ -280,16 +280,16 @@ export class RunnerRenderer {
     const width = this.cachedWidth
     const height = this.cachedHeight
 
-    // Player collision box (green)
+    // Player collision box (green) - uses actual collision zone from Z values
     const playerLeft = (playerX - playerBodyWidth / 2) * width
     const playerRight = (playerX + playerBodyWidth / 2) * width
-    const zoneStartY = this.getYFromZ(collisionZoneStart)
-    const zoneEndY = this.getYFromZ(collisionZoneEnd)
+    const boxTop = this.getYFromZ(collisionZoneStart)
+    const boxBottom = this.getYFromZ(collisionZoneEnd)
 
     this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)'
     this.ctx.lineWidth = 3
     this.ctx.setLineDash([5, 5])
-    this.ctx.strokeRect(playerLeft, zoneStartY, playerRight - playerLeft, zoneEndY - zoneStartY)
+    this.ctx.strokeRect(playerLeft, boxTop, playerRight - playerLeft, boxBottom - boxTop)
     this.ctx.setLineDash([])
 
     // Draw object collision boxes
