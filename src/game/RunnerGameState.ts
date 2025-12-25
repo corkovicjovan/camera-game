@@ -138,7 +138,7 @@ export class RunnerGameState {
       if (!obj.collected && obj.z >= collisionZoneStart && obj.z <= collisionZoneEnd) {
         // Get object's X position (0-1 normalized based on lane)
         const objX = this.getLaneXNormalized(obj.lane)
-        const objHalfWidth = 0.12 // Object collision width
+        const objHalfWidth = 0.07 // Object collision width - narrower for easier dodging
 
         // Player collision bounds
         const playerLeft = this.playerX - this.playerBodyWidth / 2

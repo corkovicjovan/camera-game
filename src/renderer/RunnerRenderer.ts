@@ -293,7 +293,7 @@ export class RunnerRenderer {
     this.ctx.setLineDash([])
 
     // Draw object collision boxes
-    const objHalfWidth = 0.12
+    const objHalfWidth = 0.07
     for (const obj of objects) {
       if (obj.collected) continue
       if (obj.z >= collisionZoneStart && obj.z <= collisionZoneEnd) {
